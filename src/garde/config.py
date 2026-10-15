@@ -16,3 +16,4 @@ class Settings(BaseSettings):
     robinhood_chain_id: int = 4663
     robinhood_rpc_url: str = "https://rpc.mainnet.chain.robinhood.com"
     helius_api_key: SecretStr | None = None
+    database_url: str = "sqlite+aiosqlite:///./garde.db"
