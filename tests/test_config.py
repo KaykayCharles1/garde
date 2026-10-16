@@ -18,3 +18,14 @@ def test_defaults_and_secret_masking(monkeypatch):
     assert s.robinhood_chain_id == 4663
     assert s.telegram_bot_token.get_secret_value() == "123:fake-token"
     assert "fake-token" not in str(s.telegram_bot_token)  # masked when printed
+
+
+@pytest.mark.parametrize("warn,critical", [(60, 50), (0, 50), (20, 101), (50, 50)])
+def test_nonsense_holder_thresholds_are_rejected(warn, critical):
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            telegram_bot_token="123:fake-token",
+            holder_warning_pct=warn,
+            holder_critical_pct=critical,
+        )    

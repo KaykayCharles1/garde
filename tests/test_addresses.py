@@ -1,4 +1,5 @@
 import pytest
+from web3 import Web3
 
 from garde.chains.addresses import normalize_evm_address, validate_solana_address
 from garde.chains.errors import InvalidAddressError
@@ -52,3 +53,15 @@ def test_solana_rejects_wrong_length(size):
 def test_solana_rejects_bad_characters(bad):
     with pytest.raises(InvalidAddressError):
         validate_solana_address(bad)
+
+def test_valid_checksum_is_accepted_and_lowercased():
+    lower = "0xe4d5b1f1a64099c7c38d003ad93196258ae57a03"
+    assert normalize_evm_address(Web3.to_checksum_address(lower)) == lower
+
+
+def test_mixed_case_with_a_wrong_checksum_is_rejected():
+    good = Web3.to_checksum_address("0xe4d5b1f1a64099c7c38d003ad93196258ae57a03")
+    i = next(n for n, ch in enumerate(good) if n >= 2 and ch.isalpha())
+    flipped = good[:i] + good[i].swapcase() + good[i + 1 :]
+    with pytest.raises(InvalidAddressError, match="checksum"):
+        normalize_evm_address(flipped)

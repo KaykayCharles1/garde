@@ -1,5 +1,7 @@
 import re
 
+from web3 import Web3
+
 from garde.chains.errors import InvalidAddressError
 
 _EVM_RE = re.compile(r"0x[0-9a-fA-F]{40}")
@@ -10,7 +12,16 @@ def normalize_evm_address(raw: str) -> str:
     candidate = raw.strip()
     if not _EVM_RE.fullmatch(candidate):
         raise InvalidAddressError(f"not a valid EVM address: {raw!r}")
+    hex_part = candidate[2:]
+    # All-lowercase or all-uppercase carries no checksum. Mixed case claims one, so verify it.
+    is_mixed_case = hex_part != hex_part.lower() and hex_part != hex_part.upper()
+    if is_mixed_case and not Web3.is_checksum_address(candidate):
+        raise InvalidAddressError("EVM address has an invalid checksum (check for typos)")
     return candidate.lower()
+
+
+def checksum_address(address: str) -> str:
+    return Web3.to_checksum_address(address)
 
 
 def validate_solana_address(raw: str) -> str:

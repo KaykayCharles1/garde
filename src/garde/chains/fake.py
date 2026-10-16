@@ -17,6 +17,9 @@ class FakeAdapter(ChainAdapter):
     def normalize_address(self, raw: str) -> str:
         return normalize_evm_address(raw)
 
+    def explorer_address_url(self, address: str) -> str:
+        return f"https://explorer.invalid/address/{address}"
+
     async def get_token_info(self, address: str) -> TokenInfo:
         return TokenInfo(
             chain=self.chain,

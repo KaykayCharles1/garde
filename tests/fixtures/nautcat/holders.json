@@ -1,0 +1,67 @@
+{
+  "status": 200,
+  "body": {
+    "items": [
+      {
+        "address": {
+          "ens_domain_name": null,
+          "hash": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+          "implementations": [],
+          "is_contract": true,
+          "is_scam": false,
+          "is_verified": true,
+          "metadata": {
+            "tags": [
+              {
+                "meta": {
+                  "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                  "textColor": "#C163D4",
+                  "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                  "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                  "tooltipDescription": "Provided by OLI"
+                },
+                "name": "PoolManager",
+                "ordinal": 0,
+                "slug": "poolmanager",
+                "tagType": "name"
+              }
+            ]
+          },
+          "name": "PoolManager",
+          "private_tags": [],
+          "proxy_type": null,
+          "public_tags": [],
+          "reputation": "ok",
+          "watchlist_names": []
+        },
+        "token_id": null,
+        "value": "999999999999999999999980681"
+      },
+      {
+        "address": {
+          "ens_domain_name": null,
+          "hash": "0xD8ccdeEB8Ce29E485454eC0f8707a698fAB99601",
+          "implementations": [
+            {
+              "address_hash": "0x612373D7003d694220f7800EeaF8E3924c0951D3",
+              "name": "CaliburEntry"
+            }
+          ],
+          "is_contract": true,
+          "is_scam": false,
+          "is_verified": true,
+          "metadata": null,
+          "name": null,
+          "private_tags": [],
+          "proxy_type": "eip7702",
+          "public_tags": [],
+          "reputation": "ok",
+          "watchlist_names": []
+        },
+        "token_id": null,
+        "value": "19319"
+      }
+    ],
+    "next_page_params": null
+  }
+}

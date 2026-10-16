@@ -1,0 +1,31 @@
+{
+  "status": 200,
+  "body": {
+    "block_number_balance_updated_at": 89381460,
+    "coin_balance": "5263910105737107",
+    "creation_status": null,
+    "creation_transaction_hash": null,
+    "creator_address_hash": null,
+    "ens_domain_name": null,
+    "exchange_rate": "2426.14",
+    "has_beacon_chain_withdrawals": false,
+    "has_logs": false,
+    "has_token_transfers": true,
+    "has_tokens": true,
+    "has_validated_blocks": false,
+    "hash": "0x5Ae4ac3deE7F774869D116e85b2305535560328B",
+    "implementations": [],
+    "is_contract": false,
+    "is_scam": false,
+    "is_verified": false,
+    "metadata": null,
+    "name": null,
+    "private_tags": [],
+    "proxy_type": null,
+    "public_tags": [],
+    "reputation": "ok",
+    "token": null,
+    "watchlist_address_id": null,
+    "watchlist_names": []
+  }
+}

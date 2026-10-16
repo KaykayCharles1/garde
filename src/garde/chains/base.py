@@ -7,6 +7,7 @@ from garde.domain import Chain, CheckReport, RiskEvent, TokenInfo, WatchTarget
 
 class ChainAdapter(ABC):
     """Everything chain-specific lives behind this interface.
+
     The core never imports web3 or Solana code.
     """
 
@@ -15,6 +16,10 @@ class ChainAdapter(ABC):
     @abstractmethod
     def normalize_address(self, raw: str) -> str:
         """Validate and canonicalize user input. Raises InvalidAddressError."""
+
+    @abstractmethod
+    def explorer_address_url(self, address: str) -> str:
+        """Link to this address on the chain's block explorer."""
 
     @abstractmethod
     async def get_token_info(self, address: str) -> TokenInfo: ...
