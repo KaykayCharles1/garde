@@ -29,3 +29,12 @@ def test_nonsense_holder_thresholds_are_rejected(warn, critical):
             holder_warning_pct=warn,
             holder_critical_pct=critical,
         )    
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("scan_chunk_blocks", 0), ("scan_chunk_blocks", 100_001), ("scan_poll_seconds", 0)],
+)
+def test_nonsense_scan_settings_are_rejected(field, value):
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, telegram_bot_token="123:fake-token", **{field: value})

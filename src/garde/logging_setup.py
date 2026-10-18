@@ -7,6 +7,7 @@ def setup_logging(level: str = "INFO") -> None:
         format="%(asctime)s level=%(levelname)s logger=%(name)s msg=%(message)s",
         force=True,
     )
-    # The Telegram HTTP client logs full request URLs at INFO, and those URLs
-    # contain the bot token. Keep that logger quiet.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    # HTTP clients log request URLs, and URLs can carry secrets (the Telegram bot
+    # token, explorer API keys). Keep those loggers quiet whatever LOG_LEVEL is.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)

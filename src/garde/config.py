@@ -1,4 +1,4 @@
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,8 +25,22 @@ class Settings(BaseSettings):
     holder_warning_pct: float = 20.0
     holder_critical_pct: float = 50.0
 
+    scan_confirmations: int = Field(default=50, ge=0, le=10_000)
+    scan_chunk_blocks: int = Field(default=10_000, ge=1, le=100_000)
+    scan_max_backfill_blocks: int = Field(default=500_000, ge=1)
+    scan_hash_window_blocks: int = Field(default=15_000, ge=100)
+    scan_poll_seconds: float = Field(default=2.0, gt=0)
+    scan_backoff_base_seconds: float = Field(default=1.0, gt=0)
+    scan_backoff_max_seconds: float = Field(default=60.0, gt=0)
+
     @model_validator(mode="after")
     def _thresholds_make_sense(self) -> "Settings":
         if not 0 < self.holder_warning_pct < self.holder_critical_pct <= 100:
             raise ValueError("need 0 < HOLDER_WARNING_PCT < HOLDER_CRITICAL_PCT <= 100")
+        return self
+
+    @model_validator(mode="after")
+    def _backoff_is_ordered(self) -> "Settings":
+        if self.scan_backoff_max_seconds < self.scan_backoff_base_seconds:
+            raise ValueError("SCAN_BACKOFF_MAX_SECONDS must be >= SCAN_BACKOFF_BASE_SECONDS")
         return self

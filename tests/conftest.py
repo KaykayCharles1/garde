@@ -6,12 +6,16 @@ from garde.db.session import create_engine, create_session_factory
 
 
 @pytest_asyncio.fixture
-async def session(tmp_path):
-    # A real SQLite file in a temp folder, so foreign-key and constraint behavior is real.
+async def session_factory(tmp_path):
+    # A real SQLite file in a temp folder, so constraint behavior is real.
     engine = create_engine(f"sqlite+aiosqlite:///{(tmp_path / 'test.db').as_posix()}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    factory = create_session_factory(engine)
-    async with factory() as s:
-        yield s
+    yield create_session_factory(engine)
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def session(session_factory):
+    async with session_factory() as s:
+        yield s

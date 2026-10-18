@@ -61,6 +61,7 @@ class WatchedWallet(Base):
     __table_args__ = (
         UniqueConstraint("watch_id", "address", name="uq_watched_wallets_watch_address"),
     )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     watch_id: Mapped[int] = mapped_column(ForeignKey("watches.id", ondelete="CASCADE"))
     address: Mapped[str] = mapped_column(String(64))
@@ -68,13 +69,34 @@ class WatchedWallet(Base):
 
 
 class ProcessedBlock(Base):
-    """Recent block hashes per chain. Needed to find where a reorg forked. Pruned in M3."""
+    """Checkpoints: (height, hash) of blocks the scanner has fully processed.
+
+    The scan cursor is the highest height. Old rows are pruned past the checkpoint window.
+    """
 
     __tablename__ = "processed_blocks"
 
     chain: Mapped[str] = mapped_column(String(16), primary_key=True)
     height: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     block_hash: Mapped[str] = mapped_column(String(80))
+
+
+class ScanState(Base):
+    """Operational state of one chain scanner, for /status and for noticing problems."""
+
+    __tablename__ = "scan_state"
+
+    chain: Mapped[str] = mapped_column(String(16), primary_key=True)
+    last_head: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    last_error: Mapped[str | None] = mapped_column(String(200), default=None)
+    reorgs_total: Mapped[int] = mapped_column(Integer, default=0)
+    deep_reorgs_total: Mapped[int] = mapped_column(Integer, default=0)
+    last_reorg_rewind_blocks: Mapped[int | None] = mapped_column(Integer, default=None)
+    last_reorg_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    gaps_total: Mapped[int] = mapped_column(Integer, default=0)
+    last_gap_first: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    last_gap_last: Mapped[int | None] = mapped_column(BigInteger, default=None)
 
 
 class AlertEvent(Base):
