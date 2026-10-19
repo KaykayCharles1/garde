@@ -353,7 +353,7 @@ async def test_a_shrunken_chunk_grows_back_when_the_node_is_healthy(session_fact
     assert scanner.chunk_blocks > small
 
 
-async def test_downtime_beyond_the_cap_replays_the_newest_blocks_and_records_the_gap(
+async def test_downtime_beyond_the_cap_lands_halfway_inside_it_and_records_the_gap(
     session_factory,
 ):
     chain = started_chain()
@@ -363,12 +363,43 @@ async def test_downtime_beyond_the_cap_replays_the_newest_blocks_and_records_the
     await scanner.run_once()  # tip 995
     chain.mine(9000)  # head 10000, confirmed up to 9995
     chain.add_log(2000, WATCHED)  # inside the skipped gap
-    chain.add_log(9000, WATCHED)  # inside the replayed window
+    chain.add_log(9000, WATCHED)  # inside the replayed window (8996..9995)
 
     report = await scanner.run_once()
 
-    assert report.gap == (996, 7995)
+    assert report.gap == (996, 8995)
     assert delivered_heights(hooks) == [9000]
     state = await read_state(session_factory)
-    assert (state.gaps_total, state.last_gap_first, state.last_gap_last) == (1, 996, 7995)
+    assert (state.gaps_total, state.last_gap_first, state.last_gap_last) == (1, 996, 8995)
     assert state.last_head == 10_000
+
+
+async def test_exactly_at_the_cap_is_not_a_gap(session_factory):
+    chain = started_chain()
+    scanner, _ = make_scanner(
+        chain, session_factory, max_backfill_blocks=2000, chunk_blocks=500
+    )
+    await scanner.run_once()  # tip 995
+    chain.mine(2000)  # head 3000, confirmed up to 2995: exactly 2000 behind
+    report = await scanner.run_once()
+    assert report.gap is None
+    assert await tip_height(session_factory) == 2995
+
+
+async def test_a_failed_pass_after_a_gap_does_not_declare_another_gap(session_factory):
+    chain = started_chain()
+    scanner, _ = make_scanner(
+        chain, session_factory, max_backfill_blocks=2000, chunk_blocks=500
+    )
+    await scanner.run_once()
+    chain.mine(9000)
+    chain.fail_on["get_logs"] = [UpstreamError("rate limited")]
+    with pytest.raises(UpstreamError):
+        await scanner.run_once()  # gap declared, then the first chunk fails
+
+    chain.mine(30)  # the head moves on while the node is failing
+    await scanner.run_once()  # retry: must NOT skip again
+
+    state = await read_state(session_factory)
+    assert state.gaps_total == 1
+    assert await tip_height(session_factory) == 10_025

@@ -156,9 +156,13 @@ class EvmScanner:
         if target <= tip.height:
             return report  # nothing newly confirmed (or the node is lagging behind us)
 
+        
         base_height, base_hash = tip.height, tip.block_hash
-        skip_to = target - self._cfg.max_backfill_blocks
-        if skip_to > base_height:  # downtime longer than the backfill cap
+        if target - base_height > self._cfg.max_backfill_blocks:
+            # Downtime longer than the cap. Land HALFWAY inside the cap, not at its edge:
+            # if the node keeps failing, the window slides forward with the chain head, and
+            # landing at the edge would declare a new gap on every retry.
+            skip_to = target - self._cfg.max_backfill_blocks // 2
             report.gap = (base_height + 1, skip_to)
             base_height, base_hash = await self._skip_gap(base_height, skip_to)
 

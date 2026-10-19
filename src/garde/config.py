@@ -24,9 +24,12 @@ class Settings(BaseSettings):
 
     holder_warning_pct: float = 20.0
     holder_critical_pct: float = 50.0
+    large_transfer_warning_pct: float = 1.0
+    large_transfer_critical_pct: float = 5.0
 
     scan_confirmations: int = Field(default=50, ge=0, le=10_000)
     scan_chunk_blocks: int = Field(default=10_000, ge=1, le=100_000)
+    # Skip ahead when MORE than this far behind; after a skip, replay half of it.
     scan_max_backfill_blocks: int = Field(default=500_000, ge=1)
     scan_hash_window_blocks: int = Field(default=15_000, ge=100)
     scan_poll_seconds: float = Field(default=2.0, gt=0)
@@ -34,9 +37,17 @@ class Settings(BaseSettings):
     scan_backoff_max_seconds: float = Field(default=60.0, gt=0)
 
     @model_validator(mode="after")
-    def _thresholds_make_sense(self) -> "Settings":
+    def _holder_thresholds_make_sense(self) -> "Settings":
         if not 0 < self.holder_warning_pct < self.holder_critical_pct <= 100:
             raise ValueError("need 0 < HOLDER_WARNING_PCT < HOLDER_CRITICAL_PCT <= 100")
+        return self
+
+    @model_validator(mode="after")
+    def _transfer_thresholds_make_sense(self) -> "Settings":
+        if not 0 < self.large_transfer_warning_pct < self.large_transfer_critical_pct <= 100:
+            raise ValueError(
+                "need 0 < LARGE_TRANSFER_WARNING_PCT < LARGE_TRANSFER_CRITICAL_PCT <= 100"
+            )
         return self
 
     @model_validator(mode="after")

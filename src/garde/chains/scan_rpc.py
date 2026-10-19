@@ -161,17 +161,27 @@ class HttpScanRpc:
             found[height] = header
         return found
 
+
+    @staticmethod
+    def _label(payload: Any) -> str:
+        first = payload[0] if isinstance(payload, list) and payload else payload
+        method = first.get("method") if isinstance(first, dict) else None
+        return clean_text(method, 40) if method else "request"
+
     async def _post(self, payload: Any) -> Any:
+        label = self._label(payload)
         try:
             response = await self._http.post(self._url, json=payload)
         except httpx.TransportError as exc:
-            raise UpstreamError(f"rpc unreachable ({type(exc).__name__})") from None
+            raise UpstreamError(f"rpc {label} unreachable ({type(exc).__name__})") from None
         if response.status_code == 429 or response.status_code >= 500:
-            raise UpstreamError(f"rpc HTTP {response.status_code}")
+            raise UpstreamError(f"rpc {label} HTTP {response.status_code}")
         try:
             return response.json()
         except ValueError:
-            raise UpstreamError(f"rpc HTTP {response.status_code} without valid JSON") from None
+            raise UpstreamError(
+                f"rpc {label} HTTP {response.status_code} without valid JSON"
+            ) from None
 
     @staticmethod
     def _unwrap(item: Any) -> Any:

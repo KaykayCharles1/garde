@@ -184,3 +184,8 @@ async def test_logs_result_must_be_a_list():
 
     with pytest.raises(UpstreamError):
         await run(handler, lambda rpc: rpc.get_logs(1, 2, {}))
+
+
+async def test_server_trouble_names_the_failing_method():
+    with pytest.raises(UpstreamError, match="eth_getLogs"):
+        await run(lambda request: httpx.Response(429), lambda rpc: rpc.get_logs(1, 2, {}))

@@ -38,3 +38,14 @@ def test_nonsense_holder_thresholds_are_rejected(warn, critical):
 def test_nonsense_scan_settings_are_rejected(field, value):
     with pytest.raises(ValidationError):
         Settings(_env_file=None, telegram_bot_token="123:fake-token", **{field: value})
+
+
+@pytest.mark.parametrize("warn,critical", [(5, 1), (0, 5), (1, 101), (2, 2)])
+def test_nonsense_large_transfer_thresholds_are_rejected(warn, critical):
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            telegram_bot_token="123:fake-token",
+            large_transfer_warning_pct=warn,
+            large_transfer_critical_pct=critical,
+        )
