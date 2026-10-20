@@ -280,7 +280,9 @@ def test_real_mints_are_detected_and_prove_our_transfer_hash_matches_the_chain()
 def test_real_ownership_logs_decode_when_present():
     token, logs = real_logs("basket")
     ctx = TokenContext(address=token, decimals=18, supply=10**27)
-    for log in logs:
-        if log.topics and log.topics[0] == OWNERSHIP_TRANSFERRED:
-            (detection,) = run(log, ctx)
-            assert detection.event.rule in (Rule.OWNERSHIP_TRANSFERRED, Rule.OWNERSHIP_RENOUNCED)
+    found = [log for log in logs if log.topics and log.topics[0] == OWNERSHIP_TRANSFERRED]
+    if not found:
+        pytest.skip("no real OwnershipTransferred log captured yet")
+    for log in found:
+        (detection,) = run(log, ctx)
+        assert detection.event.rule in (Rule.OWNERSHIP_TRANSFERRED, Rule.OWNERSHIP_RENOUNCED)

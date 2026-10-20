@@ -38,6 +38,11 @@ class Token(Base):
     chain: Mapped[str] = mapped_column(String(16))
     address: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    symbol: Mapped[str | None] = mapped_column(String(24), default=None)
+    decimals: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Text on purpose: SQLite integers are 64-bit and a normal 18-decimals supply overflows them.
+    supply_snapshot: Mapped[str | None] = mapped_column(String(80), default=None)
+    owner_address: Mapped[str | None] = mapped_column(String(64), default=None)
 
 
 class Watch(Base):
@@ -48,6 +53,8 @@ class Watch(Base):
     chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
     token_id: Mapped[int] = mapped_column(ForeignKey("tokens.id", ondelete="CASCADE"))
     disabled_rules: Mapped[list[str]] = mapped_column(JSON, default=list)  # for /alerts
+    # Events in blocks at or before this one never reach this chat.
+    start_block: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     # lazy="selectin" loads wallets together with the watch. Async sessions cannot do lazy loading.
@@ -115,17 +122,27 @@ class AlertEvent(Base):
     explanation: Mapped[str] = mapped_column(Text)
     explorer_url: Mapped[str] = mapped_column(String(300))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    block_number: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    block_hash: Mapped[str | None] = mapped_column(String(80), default=None)
+    retracted_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
 
 
 class Delivery(Base):
-    """One row per (event, chat). sent_at stays NULL until Telegram accepts the message."""
+    """One row per (event, chat, kind). sent_at stays NULL until Telegram accepts the message.
+
+    kind: "alert", "retraction" (the event's block was reorged away) or "reconfirmed"
+    (it came back after a retraction notice had been sent).
+    """
 
     __tablename__ = "deliveries"
     __table_args__ = (
-        UniqueConstraint("alert_event_id", "chat_id", name="uq_deliveries_event_chat"),
+        UniqueConstraint(
+            "alert_event_id", "chat_id", "kind", name="uq_deliveries_event_chat_kind"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     alert_event_id: Mapped[int] = mapped_column(ForeignKey("alert_events.id", ondelete="CASCADE"))
     chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(16), default="alert", server_default="alert")
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)

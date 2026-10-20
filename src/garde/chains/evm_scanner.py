@@ -12,6 +12,8 @@ still canonical, nothing before it changed. Each chunk is read like this:
 If step 1 shows our last block is no longer canonical, we walk back through the stored
 checkpoints to the newest one that still is, rewind to it, and rescan. Rescanning is safe
 because the hooks are idempotent (dedup is enforced by the database).
+
+A hook may also end a chunk early (see ScanHooks.on_logs) when what it watches has changed.
 """
 
 import asyncio
@@ -23,7 +25,13 @@ from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from garde.chains.errors import ChainChangedDuringScan, RpcLagging, RpcRejected, UpstreamError
+from garde.chains.errors import (
+    ChainChangedDuringScan,
+    RpcLagging,
+    RpcRateLimited,
+    RpcRejected,
+    UpstreamError,
+)
 from garde.chains.scan_rpc import BlockHeader, RawLog, ScanRpc
 from garde.db import scan_repo
 from garde.sanitize import clean_text
@@ -31,6 +39,7 @@ from garde.sanitize import clean_text
 logger = logging.getLogger(__name__)
 
 MAX_REORGS_PER_RUN = 3
+MAX_STALLS_PER_RUN = 5
 CHECKPOINT_CANDIDATES = 2000
 CHUNKS_BEFORE_GROWING = 20
 
@@ -55,8 +64,13 @@ class ScanHooks(Protocol):
 
     async def on_logs(
         self, session: AsyncSession, logs: list[RawLog], from_block: int, to_block: int
-    ) -> None:
-        """Called at least once per log. Must be idempotent."""
+    ) -> int | None:
+        """Called at least once per log. Must be idempotent.
+
+        Return None normally. Return a block height to end the chunk there because the set of
+        things being watched changed: the checkpoint is written at that height and the logs
+        after it are fetched again with fresh filters.
+        """
 
     async def on_reorg(self, session: AsyncSession, fork_height: int, old_tip: int) -> None:
         """Blocks above fork_height are being rescanned. Reconcile anything built on them."""
@@ -121,8 +135,9 @@ class EvmScanner:
                 delay = self._backoff(failures)
             except Exception as exc:  # a bug must not silently kill the scanner
                 failures += 1
-                logger.exception("scan_unexpected_error chain=%s failures=%d", self._chain, 
-                                 failures)
+                logger.exception(
+                    "scan_unexpected_error chain=%s failures=%d", self._chain, failures
+                )
                 await self._remember_error(f"unexpected {type(exc).__name__}")
                 delay = self._backoff(failures)
             else:
@@ -156,7 +171,6 @@ class EvmScanner:
         if target <= tip.height:
             return report  # nothing newly confirmed (or the node is lagging behind us)
 
-        
         base_height, base_hash = tip.height, tip.block_hash
         if target - base_height > self._cfg.max_backfill_blocks:
             # Downtime longer than the cap. Land HALFWAY inside the cap, not at its edge:
@@ -167,10 +181,13 @@ class EvmScanner:
             base_height, base_hash = await self._skip_gap(base_height, skip_to)
 
         reorgs = 0
+        stalls = 0
         while base_height < target:
             to = min(base_height + self._chunk_blocks, target)
             try:
-                delivered, end_hash = await self._scan_chunk(head, base_height, base_hash, to)
+                delivered, end, end_hash = await self._scan_chunk(
+                    head, base_height, base_hash, to
+                )
             except _RetryChunk:
                 continue
             except _BaseNotCanonical:
@@ -183,15 +200,20 @@ class EvmScanner:
                     raise UpstreamError("no checkpoint left after a reorg") from None
                 base_height, base_hash = new_tip.height, new_tip.block_hash
                 continue
-            report.blocks_scanned += to - base_height
+            if end <= base_height:  # a hook ended the chunk before it made any progress
+                stalls += 1
+                if stalls > MAX_STALLS_PER_RUN:
+                    raise UpstreamError("scan made no progress")
+            report.blocks_scanned += end - base_height
             report.logs_delivered += delivered
-            base_height, base_hash = to, end_hash
+            base_height, base_hash = end, end_hash
         report.scanned_to = base_height
         return report
 
     async def _scan_chunk(
         self, head: int, base_height: int, base_hash: str, to: int
-    ) -> tuple[int, str]:
+    ) -> tuple[int, int, str]:
+        """Returns (logs handed to the hook, height the chunk really ended at, its hash)."""
         start = base_height + 1
         base_header, end_header = await self._headers([base_height, to])
         if base_header.hash != base_hash:
@@ -209,6 +231,12 @@ class EvmScanner:
                 self._chunk_blocks = max(1, span // 2)  # halve and retry the whole chunk
                 self._good_chunks = 0
                 raise _RetryChunk from None
+            except RpcRateLimited:
+                # A heavy query may be what got throttled: shrink the next attempt and let
+                # run_forever's backoff provide the pause.
+                self._chunk_blocks = max(1, (to - start + 1) // 2)
+                self._good_chunks = 0
+                raise
 
         heights = sorted({to} | {log.block_number for log in logs})
         canonical = dict(zip(heights, await self._headers(heights), strict=True))
@@ -218,11 +246,24 @@ class EvmScanner:
             if canonical[log.block_number].hash != log.block_hash:
                 raise ChainChangedDuringScan("a scanned log is no longer on the canonical chain")
 
+        end, end_hash = to, end_header.hash
         async with self._transaction() as session:
-            if logs:
-                await self._hooks.on_logs(session, logs, start, to)
-            await scan_repo.add_checkpoint(session, self._chain, to, end_header.hash)
-            await scan_repo.prune_below(session, self._chain, to - self._cfg.hash_window_blocks)
+            cut = await self._hooks.on_logs(session, logs, start, to) if logs else None
+            if cut is not None and base_height <= cut < to:
+                # The hook changed what must be watched (for example a new owner): end the
+                # chunk here so the next one starts with fresh filters.
+                end = cut
+                if cut == base_height:
+                    end_hash = base_hash
+                else:
+                    cut_header, recheck = await self._headers([cut, to])
+                    if recheck.hash != end_header.hash:
+                        raise ChainChangedDuringScan(
+                            "the chain changed while a chunk was being scanned"
+                        )
+                    end_hash = cut_header.hash
+            await scan_repo.add_checkpoint(session, self._chain, end, end_hash)
+            await scan_repo.prune_below(session, self._chain, end - self._cfg.hash_window_blocks)
             await scan_repo.mark_success(session, self._chain, head)
 
         self._note_chunk_success()
@@ -230,9 +271,9 @@ class EvmScanner:
         logger.log(
             level,
             "scan_chunk chain=%s from=%d to=%d logs=%d chunk=%d",
-            self._chain, start, to, len(logs), self._chunk_blocks,
+            self._chain, start, end, len(logs), self._chunk_blocks,
         )
-        return len(logs), end_header.hash
+        return len(logs), end, end_hash
 
     async def _fetch_logs(
         self, start: int, end: int, filters: list[dict[str, Any]]
@@ -247,7 +288,8 @@ class EvmScanner:
 
     def _note_chunk_success(self) -> None:
         self._good_chunks += 1
-        if self._good_chunks >= CHUNKS_BEFORE_GROWING and self._chunk_blocks < self._cfg.chunk_blocks:
+        shrunk = self._chunk_blocks < self._cfg.chunk_blocks
+        if self._good_chunks >= CHUNKS_BEFORE_GROWING and shrunk:
             # A shrunken chunk can recover, so one rate-limit blip does not slow us forever.
             self._chunk_blocks = min(self._cfg.chunk_blocks, self._chunk_blocks * 2)
             self._good_chunks = 0

@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from garde.chains.errors import RpcRejected, UpstreamError
+from garde.chains.errors import RpcRateLimited, RpcRejected, UpstreamError
 from garde.sanitize import clean_text
 
 _HASH_RE = re.compile(r"0x[0-9a-fA-F]{64}")
@@ -174,7 +174,9 @@ class HttpScanRpc:
             response = await self._http.post(self._url, json=payload)
         except httpx.TransportError as exc:
             raise UpstreamError(f"rpc {label} unreachable ({type(exc).__name__})") from None
-        if response.status_code == 429 or response.status_code >= 500:
+        if response.status_code == 429:
+            raise RpcRateLimited(f"rpc {label} HTTP 429")
+        if response.status_code >= 500:
             raise UpstreamError(f"rpc {label} HTTP {response.status_code}")
         try:
             return response.json()

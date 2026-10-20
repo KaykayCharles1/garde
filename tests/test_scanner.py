@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from garde.chains.errors import ChainChangedDuringScan, RpcLagging, UpstreamError
+from garde.chains.errors import ChainChangedDuringScan, RpcLagging, RpcRateLimited, UpstreamError
 from garde.chains.evm_scanner import EvmScanner, ScannerConfig
 from garde.chains.scan_rpc import RawLog
 from garde.db import scan_repo
@@ -403,3 +403,99 @@ async def test_a_failed_pass_after_a_gap_does_not_declare_another_gap(session_fa
     state = await read_state(session_factory)
     assert state.gaps_total == 1
     assert await tip_height(session_factory) == 10_025
+
+
+class CuttingHooks(RecordingHooks):
+    """Asks the scanner to end the first chunk at a given block, once."""
+
+    def __init__(self, cut: int) -> None:
+        super().__init__()
+        self.cut: int | None = cut
+
+    async def on_logs(self, session, logs, from_block, to_block):
+        await super().on_logs(session, logs, from_block, to_block)
+        cut, self.cut = self.cut, None
+        return cut
+
+
+class AlwaysCutAtStart(RecordingHooks):
+    async def on_logs(self, session, logs, from_block, to_block):
+        await super().on_logs(session, logs, from_block, to_block)
+        return from_block - 1
+
+
+async def test_a_rate_limited_get_logs_shrinks_the_next_chunk_and_backs_off(session_factory):
+    chain = started_chain()
+    scanner, _ = make_scanner(chain, session_factory, chunk_blocks=100)
+    await scanner.run_once()
+    chain.mine(500)
+    chain.fail_on["get_logs"] = [RpcRateLimited("rate limited")]
+    with pytest.raises(RpcRateLimited):
+        await scanner.run_once()
+    assert scanner.chunk_blocks == 50
+    await scanner.run_once()
+    assert await tip_height(session_factory) == 1495
+
+
+async def test_other_upstream_errors_do_not_shrink_the_chunk(session_factory):
+    chain = started_chain()
+    scanner, _ = make_scanner(chain, session_factory, chunk_blocks=100)
+    await scanner.run_once()
+    chain.mine(500)
+    chain.fail_on["get_headers"] = [UpstreamError("blip")]
+    with pytest.raises(UpstreamError):
+        await scanner.run_once()
+    assert scanner.chunk_blocks == 100
+
+
+async def test_a_hook_can_end_a_chunk_early_so_the_next_one_uses_fresh_filters(session_factory):
+    chain = started_chain()
+    hooks = CuttingHooks(1030)
+    scanner, _ = make_scanner(chain, session_factory, hooks, chunk_blocks=1000)
+    await scanner.run_once()  # initializes at 995
+    chain.mine(50)  # blocks up to 1050 exist now, so logs can be attached to them
+    chain.add_log(1010, WATCHED)
+    chain.add_log(1040, WATCHED)
+    await scanner.run_once()
+
+    ranges = [(start, end) for start, end, _ in hooks.log_calls]
+    assert ranges == [(996, 1045), (1031, 1045)]  # the hook cut the first chunk at 1030
+    assert 1030 in await checkpoint_heights(session_factory)
+    assert await tip_height(session_factory) == 1045
+
+
+async def test_a_cut_at_the_chunk_start_makes_no_progress_but_the_scan_still_finishes(
+    session_factory,
+):
+    chain = started_chain()
+    hooks = CuttingHooks(995)
+    scanner, _ = make_scanner(chain, session_factory, hooks, chunk_blocks=1000)
+    await scanner.run_once()
+    chain.mine(50)
+    chain.add_log(1010, WATCHED)
+    await scanner.run_once()
+    assert [(start, end) for start, end, _ in hooks.log_calls] == [(996, 1045), (996, 1045)]
+    assert await tip_height(session_factory) == 1045
+
+
+async def test_a_cut_beyond_the_chunk_is_ignored(session_factory):
+    chain = started_chain()
+    hooks = CuttingHooks(5000)
+    scanner, _ = make_scanner(chain, session_factory, hooks, chunk_blocks=1000)
+    await scanner.run_once()
+    chain.mine(50)
+    chain.add_log(1010, WATCHED)
+    await scanner.run_once()
+    assert len(hooks.log_calls) == 1
+    assert await tip_height(session_factory) == 1045
+
+
+async def test_a_hook_that_never_lets_the_scan_advance_cannot_hang_it(session_factory):
+    chain = started_chain()
+    scanner, _ = make_scanner(chain, session_factory, AlwaysCutAtStart(), chunk_blocks=1000)
+    await scanner.run_once()
+    chain.mine(50)
+    chain.add_log(1010, WATCHED)
+    with pytest.raises(UpstreamError, match="no progress"):
+        await scanner.run_once()
+    assert await tip_height(session_factory) == 995

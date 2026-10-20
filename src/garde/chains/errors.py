@@ -14,6 +14,10 @@ class RpcRejected(UpstreamError):
     """The node answered with a JSON-RPC error (for example 'range too large')."""
 
 
+class RpcRateLimited(UpstreamError):
+    """The node answered HTTP 429. Could be a request budget or a query that was too heavy."""
+
+
 class RpcLagging(UpstreamError):
     """The node does not have a block it should have: it is behind or inconsistent."""
 

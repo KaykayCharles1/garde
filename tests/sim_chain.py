@@ -13,6 +13,20 @@ def make_hash(*parts: object) -> str:
     return "0x" + hashlib.sha256(":".join(str(p) for p in parts).encode()).hexdigest()
 
 
+def _matches(log: RawLog, log_filter: dict[str, Any]) -> bool:
+    """eth_getLogs semantics: address list; topics by position, a list means 'any of', None means any."""
+    addresses = {a.lower() for a in log_filter.get("address", [])}
+    if addresses and log.address not in addresses:
+        return False
+    for position, allowed in enumerate(log_filter.get("topics", [])):
+        if allowed is None:
+            continue
+        options = {allowed} if isinstance(allowed, str) else set(allowed)
+        if position >= len(log.topics) or log.topics[position] not in options:
+            return False
+    return True
+
+
 class SimChain:
     """A fake node. Hashes commit to the parent hash, so a reorg changes every later hash."""
 
@@ -49,12 +63,19 @@ class SimChain:
             )
 
     def add_log(
-        self, height: int, address: str, *, log_index: int = 0, tx_hash: str | None = None
+        self,
+        height: int,
+        address: str,
+        *,
+        log_index: int = 0,
+        tx_hash: str | None = None,
+        topics: Sequence[str] | None = None,
+        data: str = "0x",
     ) -> RawLog:
         log = RawLog(
             address=address,
-            topics=(make_hash("topic"),),
-            data="0x",
+            topics=tuple(topics) if topics is not None else (make_hash("topic"),),
+            data=data,
             block_number=height,
             block_hash=self.hash_at(height),
             tx_hash=tx_hash or make_hash("tx", self.epoch, height, log_index),
@@ -102,11 +123,10 @@ class SimChain:
             hook()
         if self.max_span is not None and to_block - from_block + 1 > self.max_span:
             raise RpcRejected("query spans too many blocks")
-        wanted = {a.lower() for a in log_filter.get("address", [])}
         logs = [
             log
             for height in range(from_block, min(to_block, self.head) + 1)
             for log in self.blocks[height]["logs"]
-            if not wanted or log.address in wanted
+            if _matches(log, log_filter)
         ]
         return logs + self.injected

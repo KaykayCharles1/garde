@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from garde.chains.errors import RpcRejected, UpstreamError
+from garde.chains.errors import RpcRateLimited, RpcRejected, UpstreamError
 from garde.chains.scan_rpc import HttpScanRpc
 
 URL = "https://rpc.invalid/secret-path"
@@ -188,4 +188,9 @@ async def test_logs_result_must_be_a_list():
 
 async def test_server_trouble_names_the_failing_method():
     with pytest.raises(UpstreamError, match="eth_getLogs"):
+        await run(lambda request: httpx.Response(429), lambda rpc: rpc.get_logs(1, 2, {}))
+
+
+async def test_http_429_is_reported_as_rate_limiting():
+    with pytest.raises(RpcRateLimited, match="eth_getLogs"):
         await run(lambda request: httpx.Response(429), lambda rpc: rpc.get_logs(1, 2, {}))
