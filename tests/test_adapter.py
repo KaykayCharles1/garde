@@ -22,3 +22,12 @@ async def test_poll_only_returns_events_for_watched_tokens():
     events = await adapter.poll_events([WatchTarget(chain=adapter.chain, token_address=TOKEN)])
     assert [e.token_address for e in events] == [TOKEN]
     assert adapter.poll_calls == 1
+
+
+async def test_fake_snapshot_returns_what_the_tests_configure():
+    adapter = FakeAdapter()
+    adapter.owner = "0x" + "22" * 20
+    snapshot = await adapter.snapshot_for_watch(TOKEN)
+    assert snapshot.owner == "0x" + "22" * 20
+    assert snapshot.token.symbol == "FAKE"
+    assert len(snapshot.top_wallets) == 3

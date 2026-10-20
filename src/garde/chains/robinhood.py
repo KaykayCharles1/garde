@@ -3,11 +3,17 @@ from collections.abc import Sequence
 from typing import Any
 
 from garde.chains.addresses import checksum_address, normalize_evm_address
-from garde.chains.base import ChainAdapter
+from garde.chains.base import ChainAdapter, WatchSnapshot
 from garde.chains.blockscout import ExplorerApi
-from garde.chains.errors import CallReverted, NotATokenError, UpstreamError
+from garde.chains.errors import (
+    CallReverted,
+    InvalidAddressError,
+    NotATokenError,
+    UpstreamError,
+)
 from garde.chains.evm_rpc import EvmRpc
 from garde.chains.holders import analyze_holders, holders_finding
+from garde.chains.snapshot import top_wallet_holders
 from garde.domain import (
     Chain,
     CheckReport,
@@ -287,6 +293,44 @@ class RobinhoodAdapter(ChainAdapter):
             payload, total_supply, warn_pct=self._warn_pct, critical_pct=self._critical_pct
         )
         return holders_finding(result, total_supply)
+
+    async def snapshot_for_watch(self, address: str) -> WatchSnapshot:
+        normalized = self.normalize_address(address)
+        data = await self._explorer.get_address(normalized)
+        token = parse_token(normalized, data)
+        facts = data or {}
+        # Both calls may raise UpstreamError. That is deliberate: no silent partial watch.
+        holders_payload, owner = await asyncio.gather(
+            self._explorer.get_holders(normalized),
+            self._owner_address(normalized),
+        )
+        deployer: str | None = None
+        raw_deployer = facts.get("creator_address_hash")
+        if isinstance(raw_deployer, str):
+            try:
+                deployer = normalize_evm_address(raw_deployer)
+            except InvalidAddressError:
+                deployer = None
+        return WatchSnapshot(
+            token=token,
+            owner=owner,
+            deployer=deployer,
+            top_wallets=tuple(top_wallet_holders(holders_payload or {}, 3)),
+        )
+
+    async def _owner_address(self, address: str) -> str | None:
+        """The current owner, lowercase, or None if there is none (no owner(), or renounced)."""
+        try:
+            word = await self._rpc.call_owner(address)
+        except CallReverted:
+            return None
+        if not word:
+            return None
+        try:
+            owner = address_from_word(word)
+        except ValueError:
+            return None
+        return owner.lower() if owner else None
 
     async def poll_events(self, targets: Sequence[WatchTarget]) -> list[RiskEvent]:
         raise NotImplementedError("Robinhood event polling arrives in M3")

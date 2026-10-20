@@ -1,8 +1,19 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import ClassVar
 
 from garde.domain import Chain, CheckReport, RiskEvent, TokenInfo, WatchTarget
+
+
+@dataclass(frozen=True)
+class WatchSnapshot:
+    """Facts captured when a watch starts. Addresses are lowercase."""
+
+    token: TokenInfo
+    owner: str | None  # None: no owner() function, renounced, or not applicable
+    deployer: str | None
+    top_wallets: tuple[str, ...]  # largest holders that are wallets, not contracts
 
 
 class ChainAdapter(ABC):
@@ -27,6 +38,10 @@ class ChainAdapter(ABC):
     @abstractmethod
     async def check_token(self, address: str) -> CheckReport:
         """Static check. Must always include a 'liquidity' finding, visible or not."""
+
+    @abstractmethod
+    async def snapshot_for_watch(self, address: str) -> WatchSnapshot:
+        """Everything /watch stores. Raises NotATokenError or UpstreamError, never partial."""
 
     @abstractmethod
     async def poll_events(self, targets: Sequence[WatchTarget]) -> list[RiskEvent]:

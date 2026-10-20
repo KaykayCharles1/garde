@@ -4,6 +4,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from garde.bot.formatting import format_report
+from garde.bot.watch_handlers import list_command, unwatch, watch
 from garde.chains.errors import InvalidAddressError, NotATokenError, UpstreamError
 from garde.domain import Chain
 
@@ -12,12 +13,13 @@ logger = logging.getLogger(__name__)
 START_TEXT = (
     "Garde watches tokens for risky onchain activity and sends risk signals.\n\n"
     "Try: /check robinhood <token address>\n"
-    "Coming soon: /watch, /unwatch, /list, /alerts, /status.\n\n"
+    "Watch a token: /watch robinhood <token address>\n"
+    "Also: /unwatch, /list. Coming soon: /alerts, /status.\n\n"
     "Garde reports risk signals only. This is not financial advice, "
     "and alerts can arrive after the damage is done."
 )
 USAGE = "Usage: /check <chain> <address>\nExample: /check robinhood 0x..."
-STUB_COMMANDS = ("help", "watch", "unwatch", "list", "alerts", "status")
+STUB_COMMANDS = ("help", "alerts", "status")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -77,5 +79,8 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def register_handlers(app: Application) -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("check", check))
+    app.add_handler(CommandHandler("watch", watch))
+    app.add_handler(CommandHandler("unwatch", unwatch))
+    app.add_handler(CommandHandler("list", list_command))
     for name in STUB_COMMANDS:
         app.add_handler(CommandHandler(name, not_implemented))
