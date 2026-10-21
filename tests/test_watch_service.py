@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from garde.chains.errors import NotATokenError, UpstreamError
 from garde.chains.fake import FAKE_DEPLOYER, FAKE_TOP_WALLETS, FakeAdapter
-from garde.db.models import AlertEvent, Chat, Delivery, Token, Watch
+from garde.db.models import AlertEvent, Chat, Delivery, ScanState, Token, Watch
 from garde.domain import Chain
 from garde.watch_service import AddResult, LimitReached, ServiceConfig, WatchError, WatchService
 
@@ -252,3 +252,34 @@ async def test_listing_shows_a_chats_watches_in_order(session_factory):
     assert [s.address for s in summaries] == [token(2), token(1)]
     assert [s.wallet_count for s in summaries] == [5, 4]
     assert await service.list_watches(telegram_chat_id=99) == []
+
+
+async def seed_gaps(factory, total: int) -> None:
+    async with factory() as session, session.begin():
+        session.add(
+            ScanState(chain="robinhood", reorgs_total=0, deep_reorgs_total=0, gaps_total=total)
+        )
+
+
+async def test_a_chat_starting_to_watch_is_not_told_about_gaps_that_came_before(session_factory):
+    await seed_gaps(session_factory, 3)
+    service, _ = make_service(session_factory)
+    await add(service, 1, chat=1)
+    (chat,) = await rows(session_factory, Chat)
+    assert chat.gaps_notified == 3
+
+
+async def test_a_returning_chat_is_reset_but_an_active_one_is_not(session_factory):
+    service, _ = make_service(session_factory)
+    await add(service, 1, chat=1)
+    async with session_factory() as session, session.begin():
+        await session.merge(
+            ScanState(chain="robinhood", reorgs_total=0, deep_reorgs_total=0, gaps_total=2)
+        )
+    await add(service, 2, chat=1)  # the chat already watches something: still owed the notice
+    assert (await rows(session_factory, Chat))[0].gaps_notified == 0
+
+    await service.remove_watch(telegram_chat_id=1, chain=Chain.ROBINHOOD, address=token(1))
+    await service.remove_watch(telegram_chat_id=1, chain=Chain.ROBINHOOD, address=token(2))
+    await add(service, 3, chat=1)  # empty again, so it starts fresh
+    assert (await rows(session_factory, Chat))[0].gaps_notified == 2

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -109,36 +109,33 @@ async def mark_retracted_above(session: AsyncSession, chain: str, height: int) -
     return result.rowcount
 
 
-async def finalize_retractions(session: AsyncSession, chain: str, tip: int) -> None:
+async def finalize_retractions(
+    session: AsyncSession, chain: str, tip: int, *, since: datetime | None = None
+) -> None:
     """Once the scan has passed an event's old block, queue retraction notices for it.
 
-    Only chats that actually received the alert are told. Safe to call repeatedly.
+    Only chats that actually received the alert are told. Safe to call repeatedly. `since`
+    bounds the work to events retracted recently, so old ones are not re-checked forever.
     """
-    event_ids = (
-        (
-            await session.execute(
-                select(AlertEvent.id).where(
-                    AlertEvent.chain == chain,
-                    AlertEvent.retracted_at.is_not(None),
-                    AlertEvent.block_number <= tip,
-                )
-            )
-        )
-        .scalars()
-        .all()
+    stmt = select(AlertEvent.id).where(
+        AlertEvent.chain == chain,
+        AlertEvent.retracted_at.is_not(None),
+        AlertEvent.block_number <= tip,
     )
-    for event_id in event_ids:
+    if since is not None:
+        stmt = stmt.where(AlertEvent.retracted_at >= since)
+    for event_id in (await session.execute(stmt)).scalars().all():
         received = await _chat_ids(session, event_id, "alert", sent_only=True)
         await queue_deliveries(session, event_id, received, "retraction")
 
 
 async def pending_deliveries(
-    session: AsyncSession, limit: int = 100
+    session: AsyncSession, limit: int = 100, *, delivery_id: int | None = None
 ) -> list[tuple[Delivery, AlertEvent]]:
     """What the sender should send now, oldest first.
 
     An unsent alert for a retracted event is skipped, and a retraction notice is only sent
-    while the event is still retracted.
+    while the event is still retracted. `delivery_id` re-checks one specific delivery.
     """
     live = and_(Delivery.kind.in_(("alert", "reconfirmed")), AlertEvent.retracted_at.is_(None))
     gone = and_(Delivery.kind == "retraction", AlertEvent.retracted_at.is_not(None))
@@ -149,6 +146,8 @@ async def pending_deliveries(
         .order_by(Delivery.id)
         .limit(limit)
     )
+    if delivery_id is not None:
+        stmt = stmt.where(Delivery.id == delivery_id)
     return [(row[0], row[1]) for row in (await session.execute(stmt)).all()]
 
 
@@ -156,3 +155,7 @@ async def mark_sent(session: AsyncSession, delivery_id: int) -> None:
     await session.execute(
         update(Delivery).where(Delivery.id == delivery_id).values(sent_at=_now())
     )
+
+
+async def delete_delivery(session: AsyncSession, delivery_id: int) -> None:
+    await session.execute(delete(Delivery).where(Delivery.id == delivery_id))

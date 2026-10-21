@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from garde.chains.base import ChainAdapter, WatchSnapshot
 from garde.chains.errors import InvalidAddressError
 from garde.chains.holders import BURN_ADDRESSES
-from garde.db.models import AlertEvent, Chat, Delivery, Token, Watch, WatchedWallet
+from garde.db.models import AlertEvent, Chat, Delivery, ScanState, Token, Watch, WatchedWallet
 from garde.domain import Chain
 from garde.sanitize import clean_text
 
@@ -89,6 +89,11 @@ async def _find_token(session: AsyncSession, chain: Chain, address: str) -> Toke
     return result.scalar_one_or_none()
 
 
+async def _current_gaps(session: AsyncSession, chain: Chain) -> int:
+    state = await session.get(ScanState, chain.value)
+    return state.gaps_total if state is not None else 0
+
+
 class WatchService:
     def __init__(
         self,
@@ -153,6 +158,9 @@ class WatchService:
                     f"This chat already watches {watching} tokens, which is the limit. "
                     "Use /unwatch to free a slot."
                 )
+            if watching == 0:
+                # A chat with no watches has nothing to be told about gaps that came before it.
+                chat.gaps_notified = await _current_gaps(session, chain)
             if token is None:
                 total = await _count(session, Token)
                 if total >= self._cfg.max_global:

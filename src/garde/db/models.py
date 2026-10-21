@@ -26,7 +26,9 @@ class Chat(Base):
     telegram_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     kind: Mapped[str] = mapped_column(String(16))  # "private" or "group"
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-
+    # How many of the scanner's gaps (skipped block ranges) this chat has been told about.
+    gaps_notified: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    
 
 class Token(Base):
     """One row per (chain, address), shared by every chat that watches it."""
